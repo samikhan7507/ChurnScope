@@ -331,7 +331,7 @@ The Streamlit dashboard (`streamlit_app.py`) has three pages:
 ## 📬 Contact
 
 **Md Sami Ahmad**  
-📧 samikhan75076@gmail.com  
+📧 samikhan57705@gmail.com  
 🔗 [LinkedIn — sami7507](https://linkedin.com/in/samikhan07)  
 🐙 [GitHub — sami7507](https://github.com/samikhan7507)
 
