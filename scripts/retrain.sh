@@ -1,77 +1,70 @@
 #!/usr/bin/env bash
 # ============================================================
-# retrain.sh — Automated model retraining script
-# Designed to be run by cron, CI/CD, or a scheduler.
-#
+# retrain.sh — Automated model retraining with failure alerting
 # Usage:
-#   bash scripts/retrain.sh                   # Use real data
-#   bash scripts/retrain.sh --synthetic       # Use synthetic data
-#   NOTIFY=1 bash scripts/retrain.sh          # + Slack notification
+#   bash scripts/retrain.sh                 # train on data/raw/telco_churn.csv
+#   bash scripts/retrain.sh --synthetic     # train on synthetic dataset
+#   NOTIFY=1 bash scripts/retrain.sh        # send Slack alert on success/failure
 #
-# Cron example (retrain every Sunday at 2am):
-#   0 2 * * 0 /path/to/project/scripts/retrain.sh >> /var/log/churn_retrain.log 2>&1
+# Cron example (every Sunday at 02:00 UTC):
+#   0 2 * * 0 /path/to/ChurnScope/scripts/retrain.sh >> /var/log/churnscope_retrain.log 2>&1
 # ============================================================
 
 set -euo pipefail
 
-TIMESTAMP=$(date '+%Y-%m-%d %H:%M:%S')
+TIMESTAMP=$(date -u '+%Y-%m-%d %H:%M:%S UTC')
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
-LOG_FILE="$PROJECT_ROOT/logs/retrain_$(date +%Y%m%d).log"
-SYNTHETIC="${1:-}"
-
-echo "=============================================="
-echo "CHURN MODEL RETRAINING — $TIMESTAMP"
-echo "=============================================="
+LOG_FILE="$PROJECT_ROOT/logs/retrain_$(date -u +%Y%m%d).log"
+MODE="${1:-}"
 
 cd "$PROJECT_ROOT"
+mkdir -p logs
 
-# Activate venv if it exists
+if [ -f ".env" ]; then
+    set -a
+    # shellcheck disable=SC1091
+    source .env
+    set +a
+fi
+
 if [ -d ".venv" ]; then
+    # shellcheck disable=SC1091
     source .venv/bin/activate
 fi
 
-# Create log directory
-mkdir -p logs
+notify_slack() {
+    local message="$1"
+    if [ "${NOTIFY:-0}" = "1" ] && [ -n "${SLACK_WEBHOOK_URL:-}" ]; then
+        curl -fsS -X POST "$SLACK_WEBHOOK_URL" \
+            -H "Content-Type: application/json" \
+            -d "{\"text\": \"$message\"}" >/dev/null || true
+    fi
+}
 
-# Run the training pipeline
-echo "[$(date '+%H:%M:%S')] Starting training pipeline..."
+echo "=============================================="
+echo "CHURNSCOPE MODEL RETRAINING — $TIMESTAMP"
+echo "=============================================="
 
-if [ "$SYNTHETIC" = "--synthetic" ]; then
-    python train_pipeline.py --synthetic --n-samples 7043 2>&1 | tee -a "$LOG_FILE"
-else
-    python train_pipeline.py 2>&1 | tee -a "$LOG_FILE"
+TRAIN_CMD=(python3 train_pipeline.py)
+if [ "$MODE" = "--synthetic" ]; then
+    TRAIN_CMD+=(--synthetic --n-samples 7043)
 fi
 
-EXIT_CODE=$?
+set +e
+"${TRAIN_CMD[@]}" 2>&1 | tee -a "$LOG_FILE"
+EXIT_CODE=${PIPESTATUS[0]}
+set -e
 
-if [ $EXIT_CODE -eq 0 ]; then
-    echo "[$(date '+%H:%M:%S')] Training succeeded ✓"
-
-    # Optional: Send Slack notification on success
-    if [ "${NOTIFY:-0}" = "1" ] && [ -n "${SLACK_WEBHOOK_URL:-}" ]; then
-        curl -s -X POST "$SLACK_WEBHOOK_URL" \
-            -H "Content-Type: application/json" \
-            -d "{\"text\": \"✅ Churn model retrained successfully at $TIMESTAMP\"}" \
-            > /dev/null
-    fi
-
-    # Optional: Restart the API to load the new model
-    # docker-compose restart churn-api
-    # OR: kill -HUP $(pgrep -f "uvicorn api.main")
-
+if [ "$EXIT_CODE" -eq 0 ]; then
+    echo "[$(date -u '+%H:%M:%S')] Retraining completed successfully (champion-challenger gate applied)."
+    notify_slack "ChurnScope retraining succeeded at $TIMESTAMP."
+    # Optional service reload:
+    # docker compose restart churnscope-api
 else
-    echo "[$(date '+%H:%M:%S')] Training FAILED with exit code $EXIT_CODE"
-
-    # Notify on failure
-    if [ "${NOTIFY:-0}" = "1" ] && [ -n "${SLACK_WEBHOOK_URL:-}" ]; then
-        curl -s -X POST "$SLACK_WEBHOOK_URL" \
-            -H "Content-Type: application/json" \
-            -d "{\"text\": \"🚨 Churn model retraining FAILED at $TIMESTAMP. Check logs: $LOG_FILE\"}" \
-            > /dev/null
-    fi
-
-    exit 1
+    echo "[$(date -u '+%H:%M:%S')] Retraining FAILED with exit code $EXIT_CODE."
+    notify_slack "ChurnScope retraining FAILED (exit $EXIT_CODE) at $TIMESTAMP. Check $LOG_FILE."
+    exit "$EXIT_CODE"
 fi
 
 echo "Log saved: $LOG_FILE"

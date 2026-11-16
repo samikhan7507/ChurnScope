@@ -1,15 +1,18 @@
 #!/usr/bin/env bash
 # ============================================================
-# download_data.sh — Download Telco Churn dataset from Kaggle
-# Usage: bash scripts/download_data.sh
-#
-# Prerequisites:
-#   - Kaggle account: https://www.kaggle.com
-#   - Kaggle API credentials at ~/.kaggle/kaggle.json
-#   - kaggle CLI: pip install kaggle
+# download_data.sh — Download the IBM Telco Customer Churn CSV (7,043 rows)
+# Usage:
+#   bash scripts/download_data.sh            # public IBM GitHub mirror (no auth needed)
+#   bash scripts/download_data.sh --kaggle   # download via Kaggle CLI
 # ============================================================
 
 set -euo pipefail
+
+MODE="${1:-public}"
+OUTPUT_DIR="data/raw"
+OUTPUT_FILE="$OUTPUT_DIR/telco_churn.csv"
+IBM_URL="https://raw.githubusercontent.com/IBM/telco-customer-churn-on-icp4d/master/data/Telco-Customer-Churn.csv"
+KAGGLE_DATASET="blastchar/telco-customer-churn"
 
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
@@ -20,44 +23,33 @@ info()  { echo -e "${GREEN}[INFO]${NC}  $1"; }
 warn()  { echo -e "${YELLOW}[WARN]${NC}  $1"; }
 error() { echo -e "${RED}[ERROR]${NC} $1"; exit 1; }
 
-DATASET="blastchar/telco-customer-churn"
-OUTPUT_DIR="data/raw"
-OUTPUT_FILE="$OUTPUT_DIR/telco_churn.csv"
-
-info "Downloading Telco Customer Churn dataset from Kaggle..."
-
-# Check kaggle CLI
-if ! command -v kaggle &>/dev/null; then
-    error "kaggle CLI not found. Install with: pip install kaggle"
-fi
-
-# Check credentials
-KAGGLE_JSON="${KAGGLE_CONFIG_DIR:-$HOME/.kaggle}/kaggle.json"
-if [ ! -f "$KAGGLE_JSON" ]; then
-    error "Kaggle credentials not found at $KAGGLE_JSON\n  Go to https://www.kaggle.com/settings → API → Create New Token"
-fi
-
-# Create output directory
 mkdir -p "$OUTPUT_DIR"
 
-# Download
-info "Downloading dataset: $DATASET"
-kaggle datasets download -d "$DATASET" -p "$OUTPUT_DIR" --unzip
-
-# The downloaded file is named WA_Fn-UseC_-Telco-Customer-Churn.csv
-RAW_FILE="$OUTPUT_DIR/WA_Fn-UseC_-Telco-Customer-Churn.csv"
-if [ -f "$RAW_FILE" ]; then
-    mv "$RAW_FILE" "$OUTPUT_FILE"
-    info "Renamed to: $OUTPUT_FILE"
-fi
-
-# Verify
-if [ -f "$OUTPUT_FILE" ]; then
-    ROWS=$(wc -l < "$OUTPUT_FILE")
-    info "Dataset downloaded: $OUTPUT_FILE ($ROWS rows including header)"
-    info ""
-    info "Now run: python train_pipeline.py"
-    info "Or     : make train"
+if [ "$MODE" = "--kaggle" ]; then
+    command -v kaggle >/dev/null 2>&1 || error "kaggle CLI not found. Install with: pip install kaggle"
+    info "Downloading dataset from Kaggle ($KAGGLE_DATASET)..."
+    kaggle datasets download -d "$KAGGLE_DATASET" -p "$OUTPUT_DIR" --unzip
+    RAW_FILE="$OUTPUT_DIR/WA_Fn-UseC_-Telco-Customer-Churn.csv"
+    [ -f "$RAW_FILE" ] && mv "$RAW_FILE" "$OUTPUT_FILE"
 else
-    error "Download failed. File not found at $OUTPUT_FILE"
+    info "Downloading IBM Telco Customer Churn dataset..."
+    TMP_FILE="$(mktemp)"
+    if curl -fsSL --retry 3 --connect-timeout 15 "$IBM_URL" -o "$TMP_FILE"; then
+        mv "$TMP_FILE" "$OUTPUT_FILE"
+    else
+        rm -f "$TMP_FILE"
+        warn "Direct download failed; falling back to synthetic 7,043-row dataset."
+        python3 -m src.data_loader
+    fi
 fi
+
+if [ ! -s "$OUTPUT_FILE" ]; then
+    error "Dataset file is missing or empty: $OUTPUT_FILE"
+fi
+
+ROWS=$(wc -l < "$OUTPUT_FILE" | tr -d ' ')
+HEADER=$(head -n 1 "$OUTPUT_FILE")
+echo "$HEADER" | grep -q "customerID" || error "Invalid header in $OUTPUT_FILE"
+echo "$HEADER" | grep -q "Churn" || error "Missing 'Churn' column in $OUTPUT_FILE"
+
+info "Verified dataset at $OUTPUT_FILE ($((ROWS - 1)) customer records)."

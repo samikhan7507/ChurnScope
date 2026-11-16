@@ -1,295 +1,213 @@
 """
-01_eda.py  —  Exploratory Data Analysis
-========================================
-Run as a script or paste cells into a Jupyter notebook.
-Produces all EDA plots and prints a data quality report.
+01_eda.py — Exploratory Data Analysis for ChurnScope.
 
-Sections:
-  1. Dataset overview & data types
-  2. Target distribution & class imbalance
-  3. Numeric feature distributions
-  4. Categorical feature vs churn rates
-  5. Correlation heatmap
-  6. Key business insights summary
+Loads the real IBM Telco dataset (`data/raw/telco_churn.csv`) when present or falls back to
+domain-consistent synthetic data, saves 6 publication-ready plots into `notebooks/plots/`,
+and prints a verified data-quality & business-insights summary.
 """
 
-# ── Imports ────────────────────────────────────────────────────────────────
+from __future__ import annotations
+
 import os
 import sys
-sys.path.insert(0, os.path.abspath(".."))
+from pathlib import Path
 
-import warnings
-warnings.filterwarnings("ignore")
+ROOT_DIR = Path(__file__).resolve().parent.parent
+PLOTS_DIR = Path(__file__).resolve().parent / "plots"
+if str(ROOT_DIR) not in sys.path:
+    sys.path.insert(0, str(ROOT_DIR))
 
+import matplotlib
+
+if not os.getenv("DISPLAY"):
+    matplotlib.use("Agg")
+
+import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-import matplotlib.pyplot as plt
-import matplotlib.gridspec as gridspec
 import seaborn as sns
 
 from src import load_config
 from src.data_loader import DataLoader
 
-# ── Style ──────────────────────────────────────────────────────────────────
-sns.set_theme(style="whitegrid", palette="muted", font_scale=1.1)
 PALETTE = {"No Churn": "#4C9BE8", "Churn": "#E85D5D"}
-os.makedirs("plots", exist_ok=True)
 
-# ══════════════════════════════════════════════════════════════════════════
-# 1. LOAD DATA
-# ══════════════════════════════════════════════════════════════════════════
-print("=" * 60)
-print("CUSTOMER CHURN — EXPLORATORY DATA ANALYSIS")
-print("=" * 60)
 
-cfg = load_config("../config/config.yaml")
-df = DataLoader.generate_synthetic_data(n_samples=7043, random_state=42)
+def main() -> None:
+    sns.set_theme(style="whitegrid", palette="muted", font_scale=1.05)
+    PLOTS_DIR.mkdir(parents=True, exist_ok=True)
 
-# Map target back to labels for plots
-df["Churn_Label"] = df["Churn"].map({1: "Churn", 0: "No Churn"})
+    cfg = load_config(str(ROOT_DIR / "config" / "config.yaml"))
+    raw_path = ROOT_DIR / cfg["paths"]["raw_data"]
+    if raw_path.exists():
+        df = DataLoader(cfg).load(str(raw_path), require_target=True)
+        source_label = f"IBM Telco Dataset ({raw_path.name})"
+    else:
+        df = DataLoader.generate_synthetic_data(n_samples=7043, random_state=42)
+        source_label = "Synthetic Telecom Cohort"
 
-print(f"\nDataset shape : {df.shape}")
-print(f"Churn rate    : {df['Churn'].mean():.1%}  ({df['Churn'].sum():,} churners)")
-print(f"\nColumn dtypes:\n{df.dtypes.value_counts()}")
+    df["Churn_Label"] = df["Churn"].map({1: "Churn", 0: "No Churn"})
 
-# ══════════════════════════════════════════════════════════════════════════
-# 2. DATA QUALITY REPORT
-# ══════════════════════════════════════════════════════════════════════════
-print("\n── Missing Values ──────────────────────────────────────")
-null_pct = (df.isnull().sum() / len(df) * 100).sort_values(ascending=False)
-cols_with_nulls = null_pct[null_pct > 0]
-if cols_with_nulls.empty:
-    print("  No missing values detected ✓")
-else:
-    print(cols_with_nulls.to_string())
+    print("=" * 60)
+    print(f"CHURNSCOPE — EXPLORATORY DATA ANALYSIS ({source_label})")
+    print("=" * 60)
+    print(f"Shape      : {df.shape[0]:,} rows x {df.shape[1]} columns")
+    print(f"Churn rate : {df['Churn'].mean():.2%} ({int(df['Churn'].sum()):,} churners)")
 
-print("\n── Numeric Feature Summary ─────────────────────────────")
-num_cols = ["tenure", "MonthlyCharges", "TotalCharges"]
-print(df[num_cols].describe().round(2).to_string())
+    num_cols = ["tenure", "MonthlyCharges", "TotalCharges"]
+    print("\nNumeric Summary:")
+    print(df[num_cols].describe().round(2).to_string())
 
-# ══════════════════════════════════════════════════════════════════════════
-# 3. TARGET DISTRIBUTION
-# ══════════════════════════════════════════════════════════════════════════
-fig, axes = plt.subplots(1, 2, figsize=(12, 5))
-fig.suptitle("Target Distribution — Customer Churn", fontsize=14, fontweight="bold")
-
-# Pie chart
-churn_counts = df["Churn_Label"].value_counts()
-axes[0].pie(
-    churn_counts,
-    labels=churn_counts.index,
-    autopct="%1.1f%%",
-    colors=[PALETTE["Churn"], PALETTE["No Churn"]],
-    startangle=90,
-    wedgeprops={"edgecolor": "white", "linewidth": 2},
-)
-axes[0].set_title("Overall Churn Split")
-
-# Bar chart with counts
-sns.countplot(data=df, x="Churn_Label", palette=PALETTE, ax=axes[1], order=["No Churn", "Churn"])
-for p in axes[1].patches:
-    axes[1].annotate(
-        f"{int(p.get_height()):,}\n({p.get_height()/len(df):.1%})",
-        (p.get_x() + p.get_width() / 2.0, p.get_height()),
-        ha="center", va="bottom", fontsize=11,
+    # 1. Target Distribution (colors aligned dynamically with label order)
+    fig, axes = plt.subplots(1, 2, figsize=(12, 5))
+    fig.suptitle("Target Distribution — Customer Churn", fontsize=14, fontweight="bold")
+    order = ["No Churn", "Churn"]
+    counts = df["Churn_Label"].value_counts().reindex(order)
+    axes[0].pie(
+        counts.values,
+        labels=counts.index,
+        autopct="%1.1f%%",
+        colors=[PALETTE[lbl] for lbl in counts.index],
+        startangle=90,
+        wedgeprops={"edgecolor": "white", "linewidth": 2},
     )
-axes[1].set_title("Customer Count by Churn Status")
-axes[1].set_xlabel("")
-axes[1].set_ylabel("Count")
+    axes[0].set_title("Overall Churn Split")
 
-plt.tight_layout()
-plt.savefig("plots/01_target_distribution.png", dpi=150, bbox_inches="tight")
-plt.show()
-print("\nPlot saved: plots/01_target_distribution.png")
-
-# ══════════════════════════════════════════════════════════════════════════
-# 4. NUMERIC FEATURE DISTRIBUTIONS vs CHURN
-# ══════════════════════════════════════════════════════════════════════════
-fig, axes = plt.subplots(2, 3, figsize=(16, 10))
-fig.suptitle("Numeric Feature Distributions by Churn Status", fontsize=14, fontweight="bold")
-
-num_features = ["tenure", "MonthlyCharges", "TotalCharges"]
-
-for col_idx, col in enumerate(num_features):
-    # KDE plot
-    ax_kde = axes[0, col_idx]
-    for label, grp in df.groupby("Churn_Label"):
-        grp[col].dropna().plot.kde(ax=ax_kde, label=label, color=PALETTE[label], linewidth=2)
-    ax_kde.set_title(f"{col} — Density")
-    ax_kde.set_xlabel(col)
-    ax_kde.legend()
-
-    # Box plot
-    ax_box = axes[1, col_idx]
-    sns.boxplot(
-        data=df, x="Churn_Label", y=col,
-        palette=PALETTE, ax=ax_box, order=["No Churn", "Churn"],
-        linewidth=1.2,
+    sns.countplot(
+        data=df,
+        x="Churn_Label",
+        hue="Churn_Label",
+        palette=PALETTE,
+        order=order,
+        legend=False,
+        ax=axes[1],
     )
-    ax_box.set_title(f"{col} — Box Plot")
-    ax_box.set_xlabel("")
-
-plt.tight_layout()
-plt.savefig("plots/02_numeric_distributions.png", dpi=150, bbox_inches="tight")
-plt.show()
-print("Plot saved: plots/02_numeric_distributions.png")
-
-# Print group means
-print("\n── Numeric Feature Means by Churn Status ───────────────")
-print(df.groupby("Churn_Label")[num_features].mean().round(2).to_string())
-
-# ══════════════════════════════════════════════════════════════════════════
-# 5. CATEGORICAL FEATURE CHURN RATES
-# ══════════════════════════════════════════════════════════════════════════
-cat_features = [
-    "Contract", "InternetService", "PaymentMethod",
-    "TechSupport", "OnlineSecurity", "PaperlessBilling",
-]
-
-fig, axes = plt.subplots(2, 3, figsize=(18, 10))
-fig.suptitle("Churn Rate by Categorical Feature", fontsize=14, fontweight="bold")
-axes = axes.flatten()
-
-for idx, col in enumerate(cat_features):
-    churn_rate = df.groupby(col)["Churn"].mean().sort_values(ascending=False)
-    bars = axes[idx].bar(
-        range(len(churn_rate)),
-        churn_rate.values,
-        color=[
-            "#E85D5D" if v > df["Churn"].mean() else "#4C9BE8"
-            for v in churn_rate.values
-        ],
-        edgecolor="white",
-    )
-    axes[idx].axhline(df["Churn"].mean(), color="#888", linestyle="--", linewidth=1.2, label="Overall avg")
-    axes[idx].set_xticks(range(len(churn_rate)))
-    axes[idx].set_xticklabels(churn_rate.index, rotation=25, ha="right", fontsize=9)
-    axes[idx].set_title(col)
-    axes[idx].set_ylabel("Churn Rate")
-    axes[idx].set_ylim(0, min(1.0, churn_rate.max() * 1.3))
-    axes[idx].legend(fontsize=8)
-
-    # Annotate bars
-    for bar, val in zip(bars, churn_rate.values):
-        axes[idx].text(
-            bar.get_x() + bar.get_width() / 2,
-            bar.get_height() + 0.005,
-            f"{val:.1%}", ha="center", va="bottom", fontsize=8,
+    for patch in axes[1].patches:
+        h = patch.get_height()
+        axes[1].annotate(
+            f"{int(h):,}\n({h / len(df):.1%})",
+            (patch.get_x() + patch.get_width() / 2.0, h),
+            ha="center",
+            va="bottom",
+            fontsize=10,
         )
+    axes[1].set_title("Customer Count by Churn Status")
+    axes[1].set_xlabel("")
+    plt.tight_layout()
+    fig.savefig(PLOTS_DIR / "01_target_distribution.png", dpi=150, bbox_inches="tight")
+    plt.close(fig)
 
-plt.tight_layout()
-plt.savefig("plots/03_categorical_churn_rates.png", dpi=150, bbox_inches="tight")
-plt.show()
-print("Plot saved: plots/03_categorical_churn_rates.png")
+    # 2. Numeric Distributions
+    fig, axes = plt.subplots(2, 3, figsize=(16, 9))
+    fig.suptitle("Numeric Feature Distributions by Churn Status", fontsize=14, fontweight="bold")
+    for idx, col in enumerate(num_cols):
+        for lbl in order:
+            subset = df.loc[df["Churn_Label"] == lbl, col].dropna()
+            subset.plot.kde(ax=axes[0, idx], label=lbl, color=PALETTE[lbl], linewidth=2)
+        axes[0, idx].set_title(f"{col} — Density")
+        axes[0, idx].legend()
+        sns.boxplot(
+            data=df,
+            x="Churn_Label",
+            y=col,
+            hue="Churn_Label",
+            palette=PALETTE,
+            order=order,
+            legend=False,
+            ax=axes[1, idx],
+        )
+        axes[1, idx].set_xlabel("")
+    plt.tight_layout()
+    fig.savefig(PLOTS_DIR / "02_numeric_distributions.png", dpi=150, bbox_inches="tight")
+    plt.close(fig)
 
-# ══════════════════════════════════════════════════════════════════════════
-# 6. TENURE vs CHURN RATE (BINNED)
-# ══════════════════════════════════════════════════════════════════════════
-fig, ax = plt.subplots(figsize=(12, 5))
+    # 3. Categorical Churn Rates
+    cat_cols = [
+        "Contract",
+        "InternetService",
+        "PaymentMethod",
+        "TechSupport",
+        "OnlineSecurity",
+        "PaperlessBilling",
+    ]
+    fig, axes = plt.subplots(2, 3, figsize=(17, 9))
+    base_rate = float(df["Churn"].mean())
+    for ax, col in zip(axes.ravel(), cat_cols, strict=True):
+        rates = df.groupby(col)["Churn"].mean().sort_values(ascending=False)
+        colors = ["#E85D5D" if v > base_rate else "#4C9BE8" for v in rates.values]
+        bars = ax.bar(range(len(rates)), rates.values, color=colors)
+        ax.axhline(base_rate, color="#666", linestyle="--", linewidth=1.1)
+        ax.set_xticks(range(len(rates)))
+        ax.set_xticklabels(rates.index, rotation=22, ha="right", fontsize=9)
+        ax.set_ylim(0, min(1.0, float(rates.max()) * 1.28))
+        ax.set_title(col)
+        for bar, val in zip(bars, rates.values, strict=True):
+            ax.text(
+                bar.get_x() + bar.get_width() / 2,
+                bar.get_height() + 0.01,
+                f"{val:.1%}",
+                ha="center",
+                fontsize=8,
+            )
+    plt.tight_layout()
+    fig.savefig(PLOTS_DIR / "03_categorical_churn_rates.png", dpi=150, bbox_inches="tight")
+    plt.close(fig)
 
-df["tenure_bin"] = pd.cut(df["tenure"], bins=[0, 6, 12, 24, 36, 48, 72],
-                           labels=["0-6m", "7-12m", "13-24m", "25-36m", "37-48m", "49-72m"])
-tenure_churn = df.groupby("tenure_bin", observed=True)["Churn"].agg(["mean", "count"])
-
-color_bars = ["#E85D5D" if v > 0.25 else "#F4A37B" if v > 0.15 else "#4C9BE8"
-              for v in tenure_churn["mean"]]
-bars = ax.bar(range(len(tenure_churn)), tenure_churn["mean"], color=color_bars, edgecolor="white")
-ax.axhline(df["Churn"].mean(), color="#555", linestyle="--", label=f"Overall avg ({df['Churn'].mean():.1%})")
-
-for bar, (idx, row) in zip(bars, tenure_churn.iterrows()):
-    ax.text(bar.get_x() + bar.get_width() / 2, bar.get_height() + 0.005,
-            f"{row['mean']:.1%}\n(n={row['count']:,})", ha="center", va="bottom", fontsize=9)
-
-ax.set_xticks(range(len(tenure_churn)))
-ax.set_xticklabels(tenure_churn.index)
-ax.set_xlabel("Tenure Band")
-ax.set_ylabel("Churn Rate")
-ax.set_title("Churn Rate by Customer Tenure Band\n(Red = High risk, Blue = Low risk)")
-ax.legend()
-plt.tight_layout()
-plt.savefig("plots/04_tenure_churn_rate.png", dpi=150, bbox_inches="tight")
-plt.show()
-print("Plot saved: plots/04_tenure_churn_rate.png")
-
-# ══════════════════════════════════════════════════════════════════════════
-# 7. MONTHLY CHARGES vs TENURE SCATTER (CHURN vs NON-CHURN)
-# ══════════════════════════════════════════════════════════════════════════
-fig, ax = plt.subplots(figsize=(10, 6))
-
-for label, grp in df.groupby("Churn_Label"):
-    ax.scatter(
-        grp["tenure"], grp["MonthlyCharges"],
-        label=label, alpha=0.3, s=15,
-        color=PALETTE[label],
+    # 4. Tenure Bands (include_lowest=True retains 0-month signups)
+    fig, ax = plt.subplots(figsize=(11, 5))
+    df["tenure_bin"] = pd.cut(
+        df["tenure"],
+        bins=[0, 6, 12, 24, 36, 48, 75],
+        labels=["0-6m", "7-12m", "13-24m", "25-36m", "37-48m", "49m+"],
+        include_lowest=True,
     )
+    t_stats = df.groupby("tenure_bin", observed=True)["Churn"].agg(["mean", "count"])
+    colors = ["#E85D5D" if v > base_rate else "#4C9BE8" for v in t_stats["mean"]]
+    bars = ax.bar(range(len(t_stats)), t_stats["mean"], color=colors)
+    ax.axhline(base_rate, color="#555", linestyle="--", label=f"Overall ({base_rate:.1%})")
+    ax.set_xticks(range(len(t_stats)))
+    ax.set_xticklabels(t_stats.index)
+    ax.set_ylabel("Churn Rate")
+    ax.set_title("Churn Rate Across Customer Tenure Lifecycle")
+    ax.legend()
+    for bar, (_, row) in zip(bars, t_stats.iterrows(), strict=True):
+        ax.text(
+            bar.get_x() + bar.get_width() / 2,
+            bar.get_height() + 0.008,
+            f"{row['mean']:.1%}\n(n={int(row['count']):,})",
+            ha="center",
+            fontsize=9,
+        )
+    plt.tight_layout()
+    fig.savefig(PLOTS_DIR / "04_tenure_churn_rate.png", dpi=150, bbox_inches="tight")
+    plt.close(fig)
 
-ax.set_xlabel("Tenure (months)")
-ax.set_ylabel("Monthly Charges ($)")
-ax.set_title("Monthly Charges vs Tenure — Churn Pattern\n(Top-left = High risk zone)")
-ax.legend()
+    # 5. Correlation Heatmap
+    fig, ax = plt.subplots(figsize=(7, 5.5))
+    corr = df[["Churn", *num_cols]].corr()
+    mask = np.triu(np.ones_like(corr, dtype=bool))
+    sns.heatmap(
+        corr, mask=mask, annot=True, fmt=".2f", cmap="RdBu_r", center=0, vmin=-1, vmax=1, ax=ax
+    )
+    ax.set_title("Numeric Feature Correlation Matrix", fontweight="bold")
+    plt.tight_layout()
+    fig.savefig(PLOTS_DIR / "05_correlation_heatmap.png", dpi=150, bbox_inches="tight")
+    plt.close(fig)
 
-# Annotate high-risk zone
-ax.axvspan(0, 12, alpha=0.05, color="red", label="High-risk zone")
-ax.text(3, 115, "High-risk\nzone", color="#E85D5D", fontsize=9, fontweight="bold")
+    mtm = df.loc[df["Contract"] == "Month-to-month", "Churn"].mean()
+    two_yr = max(df.loc[df["Contract"] == "Two year", "Churn"].mean(), 1e-4)
+    fiber = df.loc[df["InternetService"] == "Fiber optic", "Churn"].mean()
+    echeck = df.loc[df["PaymentMethod"] == "Electronic check", "Churn"].mean()
+    new_c = df.loc[df["tenure"] <= 6, "Churn"].mean()
+    loyal_c = df.loc[df["tenure"] >= 24, "Churn"].mean()
 
-plt.tight_layout()
-plt.savefig("plots/05_scatter_charges_tenure.png", dpi=150, bbox_inches="tight")
-plt.show()
-print("Plot saved: plots/05_scatter_charges_tenure.png")
+    print("\nVerified Business Insights:")
+    print(f"  1. Month-to-month ({mtm:.1%}) vs Two-year ({two_yr:.1%}) = {mtm / two_yr:.1f}x risk")
+    print(f"  2. Early tenure <=6m ({new_c:.1%}) vs loyal >=24m ({loyal_c:.1%})")
+    print(f"  3. Fiber optic churn rate     : {fiber:.1%}")
+    print(f"  4. Electronic check churn rate: {echeck:.1%}")
+    print(f"\nSaved all EDA plots to: {PLOTS_DIR}")
 
-# ══════════════════════════════════════════════════════════════════════════
-# 8. CORRELATION HEATMAP (NUMERIC FEATURES)
-# ══════════════════════════════════════════════════════════════════════════
-fig, ax = plt.subplots(figsize=(8, 6))
 
-corr_cols = ["Churn", "tenure", "MonthlyCharges", "TotalCharges"]
-corr = df[corr_cols].corr()
-
-mask = np.triu(np.ones_like(corr, dtype=bool))
-sns.heatmap(
-    corr, mask=mask, annot=True, fmt=".2f",
-    cmap="RdBu_r", center=0, vmin=-1, vmax=1,
-    square=True, linewidths=0.5, ax=ax,
-    annot_kws={"size": 11},
-)
-ax.set_title("Correlation Matrix — Numeric Features", fontweight="bold")
-plt.tight_layout()
-plt.savefig("plots/06_correlation_heatmap.png", dpi=150, bbox_inches="tight")
-plt.show()
-print("Plot saved: plots/06_correlation_heatmap.png")
-
-# ══════════════════════════════════════════════════════════════════════════
-# 9. KEY BUSINESS INSIGHTS
-# ══════════════════════════════════════════════════════════════════════════
-print("\n" + "=" * 60)
-print("KEY BUSINESS INSIGHTS FROM EDA")
-print("=" * 60)
-
-mtm_churn = df[df["Contract"] == "Month-to-month"]["Churn"].mean()
-two_yr_churn = df[df["Contract"] == "Two year"]["Churn"].mean()
-fiber_churn = df[df["InternetService"] == "Fiber optic"]["Churn"].mean()
-new_cust_churn = df[df["tenure"] <= 6]["Churn"].mean()
-loyal_churn = df[df["tenure"] >= 24]["Churn"].mean()
-elec_churn = df[df["PaymentMethod"] == "Electronic check"]["Churn"].mean()
-
-print(f"\n1. Contract type is the strongest predictor:")
-print(f"   Month-to-month churn rate : {mtm_churn:.1%}")
-print(f"   Two-year contract churn   : {two_yr_churn:.1%}")
-print(f"   Ratio                     : {mtm_churn/two_yr_churn:.1f}x higher risk")
-
-print(f"\n2. Tenure is inversely correlated with churn:")
-print(f"   New customers (≤6 months) churn at : {new_cust_churn:.1%}")
-print(f"   Loyal customers (≥24 months) churn : {loyal_churn:.1%}")
-
-print(f"\n3. Fiber optic customers churn more (premium pricing sensitivity):")
-print(f"   Fiber optic churn rate : {fiber_churn:.1%}")
-
-print(f"\n4. Electronic check payment is a high-risk signal:")
-print(f"   Electronic check churn rate : {elec_churn:.1%}")
-
-print(f"\n5. Class imbalance: {df['Churn'].mean():.1%} positive class")
-print(f"   → Use stratified splits, class_weight='balanced', PR-AUC over ROC-AUC")
-
-print("\n" + "=" * 60)
-print(f"All EDA plots saved to: plots/")
-print("=" * 60)
+if __name__ == "__main__":
+    main()

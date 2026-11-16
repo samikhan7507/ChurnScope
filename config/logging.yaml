@@ -1,6 +1,7 @@
 # ============================================================
-# Structured Logging Configuration
-# Used by logging.config.dictConfig()
+# ChurnScope — Structured Logging Configuration
+# Loaded by src.setup_logging() via logging.config.dictConfig()
+# Falls back to console-only automatically if logs/ is read-only.
 # ============================================================
 
 version: 1
@@ -15,11 +16,6 @@ formatters:
     format: "%(asctime)s | %(levelname)-8s | %(name)s:%(lineno)d | %(funcName)s() | %(message)s"
     datefmt: "%Y-%m-%d %H:%M:%S"
 
-  json:
-    # Use python-json-logger for production JSON logging
-    # pip install python-json-logger
-    format: "%(asctime)s %(levelname)s %(name)s %(message)s"
-
 handlers:
   console:
     class: logging.StreamHandler
@@ -32,7 +28,7 @@ handlers:
     level: INFO
     formatter: detailed
     filename: logs/churn_prediction.log
-    maxBytes: 10485760    # 10 MB
+    maxBytes: 10485760
     backupCount: 5
     encoding: utf-8
 
@@ -41,7 +37,7 @@ handlers:
     level: ERROR
     formatter: detailed
     filename: logs/errors.log
-    maxBytes: 5242880     # 5 MB
+    maxBytes: 5242880
     backupCount: 3
     encoding: utf-8
 
@@ -55,21 +51,13 @@ handlers:
     encoding: utf-8
 
 loggers:
-  # Root logger
-  "":
-    level: INFO
-    handlers: [console, file_rotating, error_file]
-    propagate: false
-
-  # API-specific logger (request logs go to dedicated file)
   api:
     level: INFO
     handlers: [console, api_file]
     propagate: false
 
-  # Suppress noisy third-party loggers
-  uvicorn:
-    level: WARNING
+  uvicorn.error:
+    level: INFO
     handlers: [console]
     propagate: false
 
@@ -87,3 +75,7 @@ loggers:
     level: WARNING
     handlers: [console]
     propagate: false
+
+root:
+  level: INFO
+  handlers: [console, file_rotating, error_file]

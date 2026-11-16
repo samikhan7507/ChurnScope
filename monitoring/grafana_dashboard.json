@@ -1,115 +1,150 @@
 {
-  "__inputs": [],
-  "__requires": [
-    {"type": "grafana", "id": "grafana", "name": "Grafana", "version": "10.0.0"},
-    {"type": "datasource", "id": "prometheus", "name": "Prometheus", "version": "1.0.0"}
-  ],
-  "annotations": {"list": []},
-  "description": "Churn Prediction API — Production Monitoring Dashboard",
-  "editable": true,
-  "fiscalYearStartMonth": 0,
-  "graphTooltip": 1,
-  "id": null,
-  "links": [],
+  "title": "ChurnScope — Production Telemetry",
+  "uid": "churnscope-prod",
+  "schemaVersion": 39,
+  "version": 2,
+  "timezone": "browser",
+  "refresh": "15s",
+  "tags": ["churnscope", "mlops", "fastapi", "churn"],
+  "time": { "from": "now-1h", "to": "now" },
   "panels": [
     {
       "id": 1,
-      "title": "API Health",
+      "title": "Model Readiness",
       "type": "stat",
-      "gridPos": {"h": 4, "w": 4, "x": 0, "y": 0},
-      "targets": [{
-        "expr": "up{job=\"churn_prediction_api\"}",
-        "legendFormat": "Status"
-      }],
-      "options": {
-        "colorMode": "background",
-        "thresholds": {
-          "steps": [
-            {"color": "red", "value": 0},
-            {"color": "green", "value": 1}
+      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 0 },
+      "targets": [{ "expr": "churn_model_loaded", "legendFormat": "Model Loaded" }],
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "0": { "text": "DEGRADED", "color": "red" },
+                "1": { "text": "READY", "color": "green" }
+              }
+            }
           ]
-        },
-        "mappings": [
-          {"options": {"0": {"text": "DOWN"}, "1": {"text": "UP"}}, "type": "value"}
-        ]
+        }
       }
     },
     {
       "id": 2,
-      "title": "Requests per Second",
-      "type": "timeseries",
-      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 4},
-      "targets": [
-        {
-          "expr": "rate(http_requests_total{job=\"churn_prediction_api\"}[1m])",
-          "legendFormat": "{{method}} {{handler}} ({{status}})"
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {"unit": "reqps", "color": {"mode": "palette-classic"}}
-      }
+      "title": "API Request Rate (req/s)",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 6, "x": 6, "y": 0 },
+      "targets": [{ "expr": "sum(rate(http_requests_total[5m]))", "legendFormat": "req/s" }],
+      "fieldConfig": { "defaults": { "unit": "reqps", "decimals": 2 } }
     },
     {
       "id": 3,
-      "title": "P50 / P95 / P99 Latency",
-      "type": "timeseries",
-      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 4},
+      "title": "p95 Inference Latency",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 6, "x": 12, "y": 0 },
       "targets": [
         {
-          "expr": "histogram_quantile(0.50, rate(http_request_duration_seconds_bucket{job=\"churn_prediction_api\"}[5m]))",
-          "legendFormat": "P50"
-        },
-        {
-          "expr": "histogram_quantile(0.95, rate(http_request_duration_seconds_bucket{job=\"churn_prediction_api\"}[5m]))",
-          "legendFormat": "P95"
-        },
-        {
-          "expr": "histogram_quantile(0.99, rate(http_request_duration_seconds_bucket{job=\"churn_prediction_api\"}[5m]))",
-          "legendFormat": "P99"
+          "expr": "histogram_quantile(0.95, sum(rate(http_request_duration_seconds_bucket{handler=~\"/predict.*|/batch-predict\"}[5m])) by (le))",
+          "legendFormat": "p95"
         }
       ],
-      "fieldConfig": {"defaults": {"unit": "s"}}
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "decimals": 3,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 0.1 },
+              { "color": "red", "value": 0.25 }
+            ]
+          }
+        }
+      }
     },
     {
       "id": 4,
-      "title": "5xx Error Rate",
-      "type": "timeseries",
-      "gridPos": {"h": 6, "w": 12, "x": 0, "y": 12},
-      "targets": [{
-        "expr": "rate(http_requests_total{job=\"churn_prediction_api\",status=~\"5..\"}[5m]) / rate(http_requests_total{job=\"churn_prediction_api\"}[5m])",
-        "legendFormat": "5xx Error Rate"
-      }],
-      "fieldConfig": {"defaults": {"unit": "percentunit", "color": {"fixedColor": "red", "mode": "fixed"}}}
+      "title": "Predicted Churn Rate (15m)",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 6, "x": 18, "y": 0 },
+      "targets": [
+        {
+          "expr": "sum(rate(churn_predictions_total{prediction=\"Churn\"}[15m])) / clamp_min(sum(rate(churn_predictions_total[15m])), 1e-9)",
+          "legendFormat": "Churn Rate"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "decimals": 1,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 0.35 },
+              { "color": "red", "value": 0.5 }
+            ]
+          }
+        }
+      }
     },
     {
       "id": 5,
-      "title": "Predicted Churn Rate (Live)",
-      "type": "stat",
-      "gridPos": {"h": 4, "w": 6, "x": 12, "y": 12},
-      "targets": [{
-        "expr": "rate(churn_predictions_total{prediction=\"1\"}[1h]) / rate(churn_predictions_total[1h])",
-        "legendFormat": "Churn Rate"
-      }],
-      "options": {"colorMode": "background"},
-      "fieldConfig": {"defaults": {"unit": "percentunit"}}
+      "title": "Request Latency Quantiles (p50 / p95 / p99)",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 4 },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.50, sum(rate(http_request_duration_seconds_bucket[5m])) by (le))",
+          "legendFormat": "p50"
+        },
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(http_request_duration_seconds_bucket[5m])) by (le))",
+          "legendFormat": "p95"
+        },
+        {
+          "expr": "histogram_quantile(0.99, sum(rate(http_request_duration_seconds_bucket[5m])) by (le))",
+          "legendFormat": "p99"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "s" } }
     },
     {
       "id": 6,
-      "title": "Total Predictions (24h)",
-      "type": "stat",
-      "gridPos": {"h": 4, "w": 6, "x": 18, "y": 12},
-      "targets": [{
-        "expr": "increase(churn_predictions_total[24h])",
-        "legendFormat": "Predictions"
-      }],
-      "fieldConfig": {"defaults": {"unit": "short"}}
+      "title": "Scored Customers by Risk Tier (5m rate)",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 4 },
+      "targets": [
+        {
+          "expr": "sum(rate(churn_predictions_total[5m])) by (risk_tier)",
+          "legendFormat": "{{risk_tier}}"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "ops" } }
+    },
+    {
+      "id": 7,
+      "title": "HTTP Error Rate by Status Code",
+      "type": "timeseries",
+      "gridPos": { "h": 7, "w": 12, "x": 0, "y": 12 },
+      "targets": [
+        {
+          "expr": "sum(rate(http_requests_total{status=~\"4..|5..\"}[5m])) by (status, handler)",
+          "legendFormat": "{{status}} {{handler}}"
+        }
+      ]
+    },
+    {
+      "id": 8,
+      "title": "Predicted Churn Probability Distribution (1h)",
+      "type": "bargauge",
+      "gridPos": { "h": 7, "w": 12, "x": 12, "y": 12 },
+      "targets": [
+        {
+          "expr": "sum(increase(churn_prediction_probability_bucket[1h])) by (le)",
+          "legendFormat": "<= {{le}}"
+        }
+      ]
     }
-  ],
-  "refresh": "30s",
-  "schemaVersion": 38,
-  "tags": ["ml", "churn", "production"],
-  "time": {"from": "now-3h", "to": "now"},
-  "title": "Churn Prediction — ML API Dashboard",
-  "uid": "churn-prediction-v1",
-  "version": 1
+  ]
 }

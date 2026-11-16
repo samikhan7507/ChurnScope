@@ -1,14 +1,58 @@
-.git/ .gitignore .github/
-__pycache__/ *.pyc *.pyo *.pyd *.so .Python *.egg-info/ dist/ build/
-.venv/ venv/ env/
-.ruff_cache/ .pytest_cache/ .coverage coverage.xml htmlcov/
-notebooks/ *.ipynb .ipynb_checkpoints/
-README.md docs/
+# Git & GitHub metadata
+.git/
+.gitignore
+.github/
+
+# Python bytecode & build outputs
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+dist/
+build/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Test, lint & coverage artifacts
+tests/
+.ruff_cache/
+.pytest_cache/
+.mypy_cache/
+.coverage
+coverage.xml
+htmlcov/
+
+# Notebooks, docs & local monitoring configs
+notebooks/
+*.ipynb
+.ipynb_checkpoints/
+docs/
 monitoring/
-.env .env.* !.env.example
-data/raw/ data/processed/ data/features/
+README.md
+
+# Local data, trained binaries, logs & results
+data/raw/
+data/processed/
+data/features/
+models/trained/*.joblib
+models/artifacts/*.joblib
 logs/
 results/
-tests/
-scripts/
-*.tmp *.bak tmp/
+
+# Secrets & environment files
+.env
+.env.*
+!.env.example
+
+# Temporary & editor files
+.idea/
+.vscode/
+.DS_Store
+*.tmp
+*.bak
+tmp/

@@ -1,21 +1,62 @@
-# Python
+# Python bytecode & build artifacts
 __pycache__/
-*.pyc *.pyo *.pyd .Python *.egg-info/ dist/ build/
-# Environments
-.venv/ venv/ env/
-# Large model binaries (use Git LFS or cloud storage)
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+dist/
+build/
+eggs/
+.eggs/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Large binary model artifacts (reproducible via train_pipeline.py or cloud storage)
 models/trained/*.joblib
-models/artifacts/preprocessing_pipeline.joblib
-# Keep evaluation results and registry
+models/artifacts/*.joblib
+
+# Keep tracked evaluation metrics and model registry
 !models/artifacts/evaluation_results.json
 !models/registry/model_registry.json
-# Data
+
+# Datasets
 data/raw/*.csv
-data/processed/ data/features/
-# Logs and results
-logs/ results/ *.log
-# Dev
-.ruff_cache/ .pytest_cache/ .coverage coverage.xml htmlcov/
-.idea/ .vscode/ *.swp .DS_Store
-.ipynb_checkpoints/ *.ipynb
-.env .env.* !.env.example
+data/raw/*.parquet
+data/raw/*.json
+data/raw/*.xlsx
+data/processed/
+data/features/
+
+# Logs, batch outputs & generated plots
+logs/
+results/
+*.log
+notebooks/plots/
+
+# Testing, linting & type-checking caches
+.ruff_cache/
+.pytest_cache/
+.mypy_cache/
+.coverage
+coverage.xml
+htmlcov/
+
+# Notebooks checkpoints
+.ipynb_checkpoints/
+
+# Editors & OS files
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# Secrets & environment files (never commit .env!)
+.env
+.env.*
+!.env.example

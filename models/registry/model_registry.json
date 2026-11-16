@@ -1,14 +1,28 @@
 {
   "models": [
     {
-      "model_path": "models/trained/churn_model_lightgbm_v1_20260331_174852.joblib",
+      "run_id": "902ea0af",
+      "model_path": "models/trained/churn_model_lightgbm_v1_20261116_045048.joblib",
+      "pipeline_path": "models/artifacts/preprocessing_pipeline_lightgbm_v1_20261116_045048.joblib",
       "version": "v1",
       "algorithm": "lightgbm",
-      "cv_roc_auc": 0.8325046436434584,
-      "trained_at": "2026-03-31T17:48:52.472514",
-      "n_features": 19,
+      "is_calibrated": true,
+      "cv_roc_auc": 0.8471778240750236,
+      "cv_roc_auc_std": 0.01126205691031336,
+      "val_roc_auc": 0.8351037971017491,
+      "test_roc_auc": 0.8461882249606035,
+      "test_pr_auc": 0.6857961522676174,
+      "test_f1": 0.6345123258306538,
+      "threshold": 0.2757,
+      "n_features": 41,
+      "train_samples": 4930,
+      "val_samples": 704,
+      "test_samples": 1409,
+      "trained_at": "2026-11-16T04:50:51.121436+00:00",
       "status": "active"
     }
   ],
-  "latest": "models/trained/churn_model_lightgbm_v1_20260331_174852.joblib"
+  "latest": "models/trained/churn_model_lightgbm_v1_20261116_045048.joblib",
+  "latest_pipeline": "models/artifacts/preprocessing_pipeline_lightgbm_v1_20261116_045048.joblib",
+  "latest_threshold": 0.2757
 }

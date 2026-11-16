@@ -1,0 +1,122 @@
+# ============================================================
+# Render.com Blueprint — One-Click Production Deployment
+# Deploys:
+#   1. churnscope-api       — FastAPI + LightGBM + SHAP REST API
+#   2. churnscope-dashboard — Streamlit HUD + Installable PWA
+#
+# Deploy: Render Dashboard → New → Blueprint → select this repo
+# ============================================================
+
+services:
+  # ── 1. FastAPI Prediction & SHAP Service ───────────────────────────────────
+  - type: web
+    name: churnscope-api
+    runtime: python
+    plan: free
+    region: singapore
+    buildCommand: >-
+      pip install --upgrade pip &&
+      pip install -r requirements-api.txt &&
+      bash scripts/download_data.sh &&
+      python train_pipeline.py
+    startCommand: uvicorn api.main:app --host 0.0.0.0 --port $PORT --workers $API_WORKERS
+    healthCheckPath: /health/ready
+    autoDeploy: true
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.11.9"
+      - key: APP_ENV
+        value: "production"
+      - key: PYTHONUNBUFFERED
+        value: "1"
+      - key: PYTHONDONTWRITEBYTECODE
+        value: "1"
+      - key: CONFIG_PATH
+        value: "config/config.yaml"
+      - key: LOGGING_CONFIG_PATH
+        value: "config/logging.yaml"
+      - key: LOG_LEVEL
+        value: "INFO"
+      - key: API_HOST
+        value: "0.0.0.0"
+      - key: API_WORKERS
+        value: "1"
+      - key: API_RELOAD
+        value: "false"
+      - key: MODEL_ALGORITHM
+        value: "lightgbm"
+      - key: MODEL_VERSION
+        value: "v1"
+      - key: DEFAULT_THRESHOLD
+        value: "0.2757"
+      - key: THRESHOLD_STRATEGY
+        value: "f1"
+      - key: AUTO_TRAIN_ON_STARTUP
+        value: "true"
+      - key: AUTO_TRAIN_SAMPLES
+        value: "7043"
+      - key: MAX_BATCH_SIZE
+        value: "1000"
+      - key: RATE_LIMIT_PER_MINUTE
+        value: "120"
+      - key: ENABLE_METRICS
+        value: "true"
+      - key: ENABLE_DOCS
+        value: "true"
+      - key: DASHBOARD_URL
+        value: "https://churnscope-dashboard.onrender.com"
+      - key: ALLOWED_ORIGINS
+        value: "https://churnscope-dashboard.onrender.com"
+      - key: API_KEY
+        generateValue: true
+
+  # ── 2. Streamlit Analytics HUD & Installable PWA (Phone + Laptop) ──────────
+  - type: web
+    name: churnscope-dashboard
+    runtime: python
+    plan: free
+    region: singapore
+    buildCommand: pip install --upgrade pip && pip install -r requirements-dashboard.txt
+    startCommand: python run_dashboard.py
+    healthCheckPath: /_stcore/health
+    autoDeploy: true
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.11.9"
+      - key: APP_ENV
+        value: "production"
+      - key: PYTHONUNBUFFERED
+        value: "1"
+      - key: PYTHONDONTWRITEBYTECODE
+        value: "1"
+      - key: DASHBOARD_HOST
+        value: "0.0.0.0"
+      - key: API_BASE_URL
+        value: "https://churnscope-api.onrender.com"
+      - key: PUBLIC_API_URL
+        value: "https://churnscope-api.onrender.com"
+      - key: API_TIMEOUT_SECONDS
+        value: "25"
+      - key: API_KEY
+        fromService:
+          type: web
+          name: churnscope-api
+          envVarKey: API_KEY
+      - key: STREAMLIT_SERVER_HEADLESS
+        value: "true"
+      - key: STREAMLIT_SERVER_ENABLE_STATIC_SERVING
+        value: "true"
+      - key: STREAMLIT_SERVER_ENABLE_CORS
+        value: "false"
+      - key: STREAMLIT_SERVER_ENABLE_XSRF_PROTECTION
+        value: "true"
+      - key: STREAMLIT_BROWSER_GATHER_USAGE_STATS
+        value: "false"
+      - key: PWA_APP_NAME
+        value: "ChurnScope — Customer Churn Intelligence"
+      - key: PWA_SHORT_NAME
+        value: "ChurnScope"
+      - key: PWA_THEME_COLOR
+        value: "#00d4ff"
+      - key: PWA_BACKGROUND_COLOR
+        value: "#020408"

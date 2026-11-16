@@ -1,342 +1,206 @@
-<div align="center">
+# ChurnScope — Production Customer Churn Prediction, SHAP Explainability & PWA
 
-# 🔮 ChurnScope
+[![CI / CD Pipeline](https://github.com/samikhan7507/ChurnScope/actions/workflows/ci.yml/badge.svg)](https://github.com/samikhan7507/ChurnScope/actions/workflows/ci.yml)
+[![Python 3.11](https://img.shields.io/badge/Python-3.11-3776AB?logo=python&logoColor=white)](https://python.org)
+[![FastAPI](https://img.shields.io/badge/FastAPI-REST%20%2B%20SHAP-009688?logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com)
+[![PWA Ready](https://img.shields.io/badge/PWA-Phone%20%2B%20Laptop%20Installable-F59E0B)](static/manifest.json)
+[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 
-### Production-Grade Customer Churn Prediction System
-
-[![CI/CD](https://github.com/sami7507/churnscope/actions/workflows/ci.yml/badge.svg)](https://github.com/sami7507/churnscope/actions)
-[![Python](https://img.shields.io/badge/Python-3.11-blue?logo=python)](https://python.org)
-[![FastAPI](https://img.shields.io/badge/FastAPI-0.111-009688?logo=fastapi)](https://fastapi.tiangolo.com)
-[![LightGBM](https://img.shields.io/badge/LightGBM-4.3-brightgreen)](https://lightgbm.readthedocs.io)
-[![Docker](https://img.shields.io/badge/Docker-ready-2496ED?logo=docker)](https://docker.com)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-
-*End-to-end ML system: feature engineering → LightGBM training → FastAPI serving → SHAP explainability → interactive dashboard*
-
-[Live Demo](#quick-start) · [API Docs](#api-reference) · [Architecture](#architecture) · [Contact](#contact)
-
-</div>
+> **ChurnScope** is an end-to-end MLOps platform for telecom customer churn prediction and retention targeting. It combines a leak-free 41-feature scikit-learn + LightGBM/XGBoost training pipeline, probability calibration, champion–challenger registry gating, real-time `shap.TreeExplainer` explanations via FastAPI, Prometheus/Grafana observability, one-click Render deployment (`render.yaml` + `.env.example`), and an installable **Progressive Web App (PWA)** dashboard for desktop and mobile.
 
 ---
 
-## 🎯 What is ChurnScope?
+## Verified Model Performance (IBM Telco Customer Churn — 7,043 Customers)
 
-**ChurnScope** is a production-grade machine learning system that predicts which telecom customers are at risk of churning — and *why*. Built following MLOps best practices, it covers the complete lifecycle from raw data to deployed REST API to an interactive analytics dashboard.
+Evaluated on a stratified **1,409-customer held-out test set** (70% train = 4,930 / 10% validation = 704 / 20% test = 1,409; churn prevalence = **26.54%**). Feature statistics, probability calibration (`sigmoid`), and the decision threshold (`0.2757`) are fit strictly on training/validation splits with zero test leakage.
 
-| What it does | How |
-|---|---|
-| Predicts churn probability per customer | LightGBM with stratified CV + threshold optimization |
-| Explains every prediction | SHAP feature attribution (global + per-customer) |
-| Serves predictions at < 5ms latency | FastAPI singleton inference engine |
-| Visualizes risk in real time | Streamlit dark-theme HUD dashboard |
-| Ships to production | Docker multi-stage build + GitHub Actions CI/CD |
+| Metric | Production LightGBM (`v1`) | Source / Methodology |
+|---|---|---|
+| **5-Fold CV ROC-AUC** | **0.8472 ± 0.0113** | Stratified 5-fold CV on training split |
+| **Test ROC-AUC** | **0.8462** | Held-out test set (`n = 1,409`) |
+| **Test PR-AUC** | **0.6858** | 2.58× over 0.2654 random baseline |
+| **F1 Score** | **0.6345** | Threshold `0.2757` selected on validation split |
+| **Recall / Precision** | **79.14% / 52.95%** | Captures 296 of 374 actual churners (`FP=263, FN=78, TN=772`) |
+| **Brier Score** | **0.1333** | Platt-calibrated probability accuracy |
+| **Top-20% Decile Lift** | **2.61×** | Top 20% highest-risk cohort captures **52.1%** of all churners |
+| **Estimated Net LTV Benefit** | **+$32,386 (231.7% ROI)** | Per-customer `MonthlyCharges × 6 mo × 35%` save rate − `$25` offer cost |
+| **Test Coverage** | **90%** | 28 unit + API + PWA tests (`pytest --cov=src --cov=api`) |
 
----
+### Multi-Model Benchmark (Same 41-Feature Pipeline & Split)
 
-## 🏗 Architecture
+| Model | Test ROC-AUC | Test PR-AUC | Brier Score | Role |
+|---|---|---|---|---|
+| Dummy Classifier (prior) | 0.5000 | 0.2654 | 0.1950 | Baseline floor |
+| Logistic Regression (scaled + 22 domain features) | 0.8545 | 0.6978 | 0.1303 | Linear benchmark |
+| XGBoost (calibrated) | 0.8457 | 0.6872 | 0.1343 | Supported tree engine (`--algorithm xgboost`) |
+| **LightGBM (calibrated + TreeExplainer SHAP)** | **0.8462** | **0.6858** | **0.1333** | Default production model (non-linear interactions + fast exact SHAP) |
 
-```
-┌─────────────────────────────────────────────────────────────────────┐
-│                         ChurnScope Pipeline                         │
-├─────────────┬──────────────┬──────────────┬────────────┬───────────┤
-│  DataLoader │  FeatureEng  │ Preprocessor │  Trainer   │ Evaluator │
-│  CSV/Parquet│  22 features │  Fit once    │  LightGBM  │  SHAP +   │
-│  + schema   │  tenure bands│  sklearn pipe│  XGBoost   │  ROC/PR   │
-│  validation │  charge ratio│  save joblib │  Optuna HPO│  threshld │
-└──────┬──────┴──────────────┴──────────────┴─────┬──────┴───────────┘
-       │                                           │
-       ▼                                           ▼
-┌─────────────────────────────┐     ┌──────────────────────────────┐
-│        FastAPI Server       │     │     Streamlit Dashboard       │
-│  POST /predict              │     │  ⟢ Prediction page           │
-│  POST /batch-predict        │◄────│  ◈ SHAP Explainability       │
-│  GET  /health               │     │  ▸ Model Metrics             │
-│  GET  /metrics              │     │  ROC · CM · Feature Imp.     │
-│  Middleware: req ID + logs  │     │  Live session history         │
-└──────────────┬──────────────┘     └──────────────────────────────┘
-               │
-       ┌───────▼───────┐
-       │  Docker Image  │
-       │  2-stage build │
-       │  non-root user │
-       │  health check  │
-       └───────────────┘
-```
+**Top 5 Global SHAP Drivers:** `is_month_to_month`, `monthly_charge_per_tenure`, `charge_per_service`, `is_long_term_contract`, `OnlineSecurity`.
 
 ---
 
-## 📊 Model Performance
+## Architecture
 
-Trained on the Telco Customer Churn dataset (7,043 customers):
-
-| Metric | Score |
-|---|---|
-| ROC-AUC | **0.856** |
-| F1 Score | **0.764** |
-| Precision | **78.6%** |
-| Recall | **74.3%** |
-| PR-AUC | 0.712 |
-| Optimal Threshold | 0.263 (F1-optimized) |
-
-**Business impact** (test set estimate):
-- Churn coverage: **74.3%** of actual churners identified
-- Targeting efficiency: **78.6%** of flagged customers are true churners  
-- Estimated net benefit: **~$8,400** per 1,409 customers evaluated
-
----
-
-## 🗂 Project Structure
-
-```
-churnscope/
-├── src/
-│   ├── __init__.py              # load_config() + get_logger() factory
-│   ├── data_loader.py           # Multi-source ingestion + schema validation
-│   ├── feature_engineering.py  # 22 domain features (tenure bands, ratios, flags)
-│   ├── preprocessor.py         # Fit/transform sklearn pipeline (impute→encode→scale)
-│   ├── trainer.py               # LightGBM/XGBoost + 5-fold CV + Optuna HPO
-│   ├── evaluator.py             # AUC, F1, threshold optimization, SHAP, business ROI
-│   └── predictor.py             # Singleton inference engine (<5ms latency)
-├── api/
-│   ├── main.py                  # FastAPI app: /predict, /batch-predict, /health
-│   ├── schemas.py               # Pydantic v2 request/response validation
-│   └── middleware.py            # Request ID injection + latency logging
-├── config/
-│   ├── config.yaml              # Single source of truth for all settings
-│   └── logging.yaml             # Structured rotating file + console logging
-├── data/
-│   ├── raw/                     # Source CSV (immutable)
-│   ├── processed/               # Cleaned split outputs
-│   └── features/                # Engineered feature matrices
-├── models/
-│   ├── trained/                 # Versioned .joblib model files
-│   ├── artifacts/               # Preprocessing pipeline + evaluation results
-│   └── registry/                # model_registry.json (all versions, rollback)
-├── tests/
-│   ├── test_preprocessor.py     # Unit tests: preprocessing pipeline
-│   ├── test_predictor.py        # Unit tests: inference engine
-│   └── test_api.py              # Integration tests: API endpoints
-├── .github/workflows/
-│   └── ci.yml                   # Lint → Test → Docker build → Push → Deploy
-├── streamlit_app.py             # Interactive analytics dashboard (3-page HUD)
-├── train_pipeline.py            # End-to-end orchestrator (single entry point)
-├── predict.py                   # CLI batch inference script
-├── Dockerfile                   # Multi-stage production build
-├── docker-compose.yml           # Local orchestration
-└── requirements.txt
+```text
+data/raw/telco_churn.csv (7,043 rows)
+        │
+        ▼
+┌──────────────────────────────────────────────────────────────────────┐
+│ Leak-Free Training Pipeline (train_pipeline.py)                      │
+│  1. DataLoader         : schema/value checks + Telco blank coercion  │
+│  2. Stratified Split   : 70% train / 10% val / 20% test              │
+│  3. FeatureEngineer    : 22 domain features (fit on X_train only)    │
+│  4. ColumnTransformer  : median impute + scale + unknown-safe encode │
+│  5. ChurnTrainer       : LightGBM/XGBoost + early stop + calibration │
+│  6. ChurnEvaluator     : val-set threshold + LTV ROI + Lift + SHAP   │
+│  7. Model Registry     : champion-challenger gate + versioned files  │
+└───────────────────────────────┬──────────────────────────────────────┘
+                                │
+        ┌───────────────────────┼───────────────────────┐
+        ▼                       ▼                       ▼
+┌──────────────────┐   ┌────────────────────┐   ┌────────────────────┐
+│ FastAPI Service  │   │ Installable PWA UI │   │ CLI Batch Scorer   │
+│ (api/main.py)    │◄──┤ (run_dashboard.py  │   │ (predict.py)       │
+│ /predict         │   │  streamlit_app.py) │   │ Chunked CSV/JSON/  │
+│ /predict/explain │   │ /manifest.json     │   │ Parquet inference  │
+│ /batch-predict   │   │ /sw.js (scope /)   │   │ (~16k rows/sec)    │
+│ /model/metrics   │   │ Phone + Laptop app │   └────────────────────┘
+│ /health/{live,   │   └────────────────────┘
+│          ready}  │
+│ /metrics (Prom)  │──────────► Prometheus + Grafana + Alert Rules
+└──────────────────┘
 ```
 
 ---
 
-## ⚡ Quick Start
-
-### 1. Clone & Install
+## Quick Start (Local)
 
 ```bash
-git clone https://github.com/sami7507/churnscope.git
-cd churnscope
-pip install -r requirements.txt
-```
+# 1. Clone and enter repo
+git clone https://github.com/samikhan7507/ChurnScope.git
+cd ChurnScope
 
-### 2. Train the Model
+# 2. One-command setup (creates .venv, installs deps, copies .env.example, downloads data & trains)
+bash scripts/setup.sh --yes
 
-```bash
-# With real data (place CSV at data/raw/telco_churn.csv first)
-python train_pipeline.py
+# 3. Terminal 1 — Start FastAPI backend (http://localhost:8000/docs)
+source .venv/bin/activate
+make api
 
-# Or use synthetic data (demo/testing — no real data needed)
-python train_pipeline.py --synthetic
-```
-
-### 3. Start the API
-
-```bash
-uvicorn api.main:app --host 0.0.0.0 --port 8000 --reload
-```
-
-API docs auto-generated at: **http://localhost:8000/docs**
-
-### 4. Launch the Dashboard
-
-```bash
-# In a second terminal
-streamlit run streamlit_app.py
-```
-
-Dashboard opens at: **http://localhost:8501**
-
----
-
-## 🐳 Docker Deployment
-
-```bash
-# Build and run with Docker Compose
-docker-compose up --build
-
-# Or build manually
-docker build -t churnscope:latest .
-docker run -p 8000:8000 \
-  -v $(pwd)/models:/app/models \
-  -v $(pwd)/logs:/app/logs \
-  churnscope:latest
+# 4. Terminal 2 — Start Installable PWA Dashboard (http://localhost:8501)
+source .venv/bin/activate
+make dashboard
 ```
 
 ---
 
-## 📡 API Reference
+## Install as an App (PWA — Laptop & Phone)
 
-### `POST /predict` — Single Customer
+ChurnScope ships a full Web App Manifest (`static/manifest.json`), a root-scoped service worker (`/sw.js` with `Service-Worker-Allowed: /`), standard + maskable 192×192 and 512×512 icons, Apple touch icon, desktop (`wide`) + mobile (`narrow`) install screenshots, offline fallback (`static/offline.html`), and `<head>` injection via `run_dashboard.py`.
+
+- **Laptop / Desktop (Chrome, Edge, Brave):** Open the dashboard over `https://` (e.g., your Render URL) or `http://localhost:8501`. Click the **install app icon (`⊕` / monitor-down arrow) at the right end of the browser address/search bar**, or click the amber **`INSTALL APP`** button in the dashboard top bar. Launches in a standalone desktop window with app shortcuts.
+- **Android Phone (Chrome / Edge / Samsung Internet):** Open the dashboard URL and tap the **`INSTALL APP`** button, the bottom **"Install ChurnScope"** prompt, or `⋮ → Install app / Add to Home screen`. Uses adaptive maskable icons.
+- **iPhone / iPad (Safari):** Open the dashboard URL, tap **Share (`↑`) → Add to Home Screen → Add**. Launches full-screen with the ChurnScope Apple touch icon and dark status bar.
+
+---
+
+## Deploy to Render (`render.yaml` + `.env.example`)
+
+This repository includes both a **Render Blueprint** ([`render.yaml`](render.yaml)) and a complete environment variable template ([`.env.example`](.env.example)):
+
+1. **Blueprint Deploy (Recommended):** In the Render Dashboard, click **New + → Blueprint**, connect `samikhan7507/ChurnScope`, and apply `render.yaml`. Render automatically provisions:
+   - `churnscope-api` — downloads the IBM Telco dataset and trains the production model during build, exposes `/health/ready`, `/predict/explain`, and `/metrics`, and generates a shared `API_KEY`.
+   - `churnscope-dashboard` — runs `python run_dashboard.py` on `$PORT`, automatically connects to `churnscope-api`, and serves the installable PWA over HTTPS.
+2. **Environment Configuration:** Copy `.env.example` to `.env` for local overrides, or paste key/value pairs into **Render → Service → Environment**:
+   - **API service keys:** `PYTHON_VERSION`, `APP_ENV`, `LOG_LEVEL`, `CONFIG_PATH`, `LOGGING_CONFIG_PATH`, `API_HOST`, `API_PORT`, `API_WORKERS`, `MODEL_ALGORITHM`, `MODEL_VERSION`, `DEFAULT_THRESHOLD`, `THRESHOLD_STRATEGY`, `MAX_BATCH_SIZE`, `AUTO_TRAIN_ON_STARTUP`, `AUTO_TRAIN_SAMPLES`, `API_KEY`, `DASHBOARD_URL`, `ALLOWED_ORIGINS`, `RATE_LIMIT_PER_MINUTE`, `ENABLE_METRICS`, `ENABLE_DOCS`.
+   - **Dashboard PWA keys:** `DASHBOARD_HOST`, `DASHBOARD_PORT`, `API_BASE_URL`, `PUBLIC_API_URL`, `API_KEY`, `API_TIMEOUT_SECONDS`, `STREAMLIT_SERVER_HEADLESS`, `STREAMLIT_SERVER_ENABLE_STATIC_SERVING`, `STREAMLIT_SERVER_ENABLE_CORS`, `STREAMLIT_SERVER_ENABLE_XSRF_PROTECTION`, `STREAMLIT_BROWSER_GATHER_USAGE_STATS`, `PWA_APP_NAME`, `PWA_SHORT_NAME`, `PWA_THEME_COLOR`, `PWA_BACKGROUND_COLOR`.
+
+---
+
+## Docker & Monitoring Stack
 
 ```bash
-curl -X POST http://localhost:8000/predict \
+# Start FastAPI (port 8000) + PWA Dashboard (port 8501)
+make docker-up
+
+# Start full stack including Prometheus (9090) + provisioned Grafana (3000)
+make docker-up-monitoring
+
+# Tear down
+make docker-down
+```
+
+---
+
+## API Reference
+
+| Method | Endpoint | Auth | Description |
+|---|---|---|---|
+| `GET` | `/health/live` | Public | Liveness probe (always `200` while process runs) |
+| `GET` | `/health`, `/health/ready` | Public | Readiness probe (`200` when model loaded, `503` when degraded) |
+| `POST` | `/predict` | `X-API-Key`* | Calibrated single-customer churn probability & risk tier |
+| `POST` | `/predict/explain?top_k=12` | `X-API-Key`* | Prediction + real `TreeExplainer` SHAP values + retention actions |
+| `POST` | `/batch-predict` | `X-API-Key`* | Vectorized batch scoring (up to `MAX_BATCH_SIZE`, default `1000`) |
+| `GET` | `/model/info` | `X-API-Key`* | Loaded model version, threshold, feature count, and calibration |
+| `GET` | `/model/metrics` | `X-API-Key`* | Full evaluation report, confusion matrix, ROI, global SHAP & registry |
+| `GET` | `/metrics` | Public | Prometheus OpenMetrics scrape endpoint |
+| `GET` | `/manifest.json`, `/sw.js` | Public | PWA Web App Manifest and root-scoped Service Worker |
+
+*\*Authentication is optional when `API_KEY` is unset (local dev) and enforced automatically with constant-time comparison when `API_KEY` is configured.*
+
+### Sample Request
+
+```bash
+curl -X POST http://localhost:8000/predict/explain \
   -H "Content-Type: application/json" \
   -d '{
-    "customerID": "CUST-12345",
-    "gender": "Female",
-    "SeniorCitizen": "0",
-    "Partner": "Yes",
-    "Dependents": "No",
-    "tenure": 3,
-    "PhoneService": "Yes",
-    "MultipleLines": "No",
-    "InternetService": "Fiber optic",
-    "OnlineSecurity": "No",
-    "OnlineBackup": "No",
-    "DeviceProtection": "No",
-    "TechSupport": "No",
-    "StreamingTV": "Yes",
-    "StreamingMovies": "Yes",
-    "Contract": "Month-to-month",
-    "PaperlessBilling": "Yes",
-    "PaymentMethod": "Electronic check",
-    "MonthlyCharges": 95.5,
-    "TotalCharges": 286.5
+    "customerID": "CUST-0042",
+    "gender": "Female", "SeniorCitizen": "0", "Partner": "No", "Dependents": "No",
+    "tenure": 3, "PhoneService": "Yes", "MultipleLines": "No",
+    "InternetService": "Fiber optic", "OnlineSecurity": "No", "OnlineBackup": "No",
+    "DeviceProtection": "No", "TechSupport": "No", "StreamingTV": "Yes",
+    "StreamingMovies": "Yes", "Contract": "Month-to-month",
+    "PaperlessBilling": "Yes", "PaymentMethod": "Electronic check",
+    "MonthlyCharges": 95.50, "TotalCharges": 286.50
   }'
 ```
 
-**Response:**
-```json
-{
-  "churn_probability": 0.689,
-  "churn_prediction": 1,
-  "churn_label": "Churn",
-  "risk_tier": "High",
-  "confidence": 0.378,
-  "threshold_used": 0.2631,
-  "customer_id": "CUST-12345"
-}
+---
+
+## Project Structure
+
+```text
+ChurnScope/
+├── api/                        # FastAPI service, strict Pydantic v2 schemas, Prometheus & auth middleware
+├── config/                     # Central YAML configuration (with env overrides) & rotating logging config
+├── monitoring/                 # Prometheus scrape/alert rules & provisioned Grafana dashboard
+├── notebooks/                  # Reproducible EDA, feature engineering & multi-model benchmark scripts
+├── scripts/                    # setup.sh, download_data.sh, retrain.sh & PWA asset generator
+├── src/                        # DataLoader, FeatureEngineer (22), Preprocessor (41), Trainer, Evaluator, Predictor
+├── static/                     # PWA manifest.json, sw.js, offline.html, icons (192/512/maskable/apple) & screenshots
+├── tests/                      # 28 unit, integration, security & PWA tests (90% coverage)
+├── .env.example                # Complete Render (API + Dashboard PWA) & local environment variables
+├── render.yaml                 # Render Blueprint for two-service production deployment
+├── Dockerfile                  # Multi-target non-root image (`production` API + `dashboard` PWA)
+├── docker-compose.yml          # API + PWA Dashboard + optional Prometheus/Grafana profile
+├── run_dashboard.py            # ASGI PWA server wrapping Streamlit with root /manifest.json & /sw.js
+├── streamlit_app.py            # 4-tab responsive ChurnScope HUD (Single, Batch CSV, Live SHAP, Real Metrics)
+├── train_pipeline.py           # End-to-end training, calibration, evaluation & registry CLI
+└── predict.py                  # Unlimited chunked batch scoring CLI (CSV / Parquet / JSON)
 ```
 
-### `POST /batch-predict` — Up to 1000 Customers
+---
+
+## Testing & Code Quality
 
 ```bash
-curl -X POST http://localhost:8000/batch-predict \
-  -H "Content-Type: application/json" \
-  -d '{"customers": [...]}'
-```
-
-### `GET /health` — Model Status
-
-```bash
-curl http://localhost:8000/health
-```
-
-### CLI Batch Inference
-
-```bash
-python predict.py --input data/raw/customers.csv --output results/scores.csv
+make lint        # ruff check + ruff format --check
+make test        # pytest with >=80% coverage gate (currently 90%)
+make predict     # score full 7,043-row dataset via CLI
 ```
 
 ---
 
-## 🧬 Feature Engineering
+## License
 
-ChurnScope engineers **22 domain features** from the 20 raw inputs:
-
-| Category | Features |
-|---|---|
-| Tenure bands | `tenure_band`, `is_new_customer` (<6mo), `is_loyal_customer` (>24mo), `log_tenure` |
-| Charge ratios | `monthly_charge_per_tenure`, `charge_discrepancy`, `is_high_value`, `log_monthly_charges` |
-| Service count | `total_services`, `service_penetration`, `has_internet`, `has_fiber` |
-| Interactions | `charge_tenure_risk` (high charges × new customer), `stickiness_score`, `high_risk_flag` |
-| Contract flags | `is_month_to_month`, `is_long_term_contract`, `is_electronic_check`, `is_auto_payment`, `highest_churn_risk_profile` |
-
-Key insight: `charge_tenure_risk = MonthlyCharges / (tenure + 1)` is consistently the top SHAP feature — it captures the canonical churn profile (high spend, low commitment) in a single number.
-
----
-
-## 🔬 MLOps Highlights
-
-| Practice | Implementation |
-|---|---|
-| **No train/test leakage** | Preprocessing pipeline fit only on train split, saved as joblib |
-| **Reproducible training** | Fixed random seeds, versioned artifacts, model registry JSON |
-| **Threshold optimization** | F1-optimal threshold found via precision-recall curve (not hardcoded 0.5) |
-| **Singleton inference** | Model loaded once at startup, shared across all API requests |
-| **Model versioning** | Every training run gets a timestamped file + registry entry |
-| **Structured logging** | Request IDs, latency, rotating file handlers |
-| **CI/CD** | GitHub Actions: lint → test → Docker build → smoke test → registry push |
-| **Health checks** | `/health` endpoint + Docker HEALTHCHECK + Compose healthcheck |
-
----
-
-## 🧪 Running Tests
-
-```bash
-# All tests with coverage
-pytest tests/ -v --cov=src --cov=api --cov-report=term-missing
-
-# Unit tests only
-pytest tests/test_preprocessor.py tests/test_predictor.py -v
-
-# API integration tests (requires running server)
-pytest tests/test_api.py -v
-```
-
----
-
-## ⚙️ Configuration
-
-All settings live in `config/config.yaml`. Key sections:
-
-```yaml
-model:
-  algorithm: "lightgbm"      # or "xgboost"
-  
-threshold:
-  strategy: "f1"             # "f1" | "recall" | "custom_cost"
-  cost_matrix:
-    fn_cost: 5               # Cost of missing a churner
-    fp_cost: 1               # Cost of wrong retention offer
-
-optuna:
-  enabled: false             # Set true for hyperparameter search
-  n_trials: 50
-```
-
----
-
-## 📈 Dashboard Pages
-
-The Streamlit dashboard (`streamlit_app.py`) has three pages:
-
-**⟢ Prediction** — Input panel for all 20 customer fields, real-time churn gauge, risk badge, session log, and 4 live charts (probability bar, risk tier donut, probability timeline, charges vs churn scatter).
-
-**◈ Explainability** — SHAP horizontal bar chart showing which features pushed the prediction toward or away from churn, top-8 contribution breakdown, auto-generated retention recommendations.
-
-**▸ Model Metrics** — ROC curve (AUC=0.856), Precision-Recall curve, confusion matrix, global feature importance, model registry metadata.
-
----
-
-## 📬 Contact
-
-**Md Sami Ahmad**  
-📧 samikhan57705@gmail.com  
-🔗 [LinkedIn — sami7507](https://linkedin.com/in/samikhan07)  
-🐙 [GitHub — sami7507](https://github.com/samikhan7507)
-
----
-
-<div align="center">
-<sub>Built with Python · FastAPI · LightGBM · SHAP · Streamlit · Docker</sub>
-</div>
+Released under the [MIT License](LICENSE).

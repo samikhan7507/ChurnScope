@@ -1,4 +1,3 @@
-version: "3.9"
 services:
   churnscope-api:
     build:
@@ -6,22 +5,93 @@ services:
       dockerfile: Dockerfile
       target: production
     container_name: churnscope_api
-    image: churnscope:latest
+    image: churnscope-api:latest
     ports:
-      - "8000:8000"
+      - "${API_PORT:-8000}:8000"
     volumes:
-      - ./models:/app/models
-      - ./data:/app/data
-      - ./logs:/app/logs
+      - churnscope-models:/app/models/trained
+      - churnscope-logs:/app/logs
     environment:
-      - CONFIG_PATH=/app/config/config.yaml
-      - PYTHONUNBUFFERED=1
+      CONFIG_PATH: /app/config/config.yaml
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      PORT: "8000"
+      API_WORKERS: ${API_WORKERS:-1}
+      AUTO_TRAIN_ON_STARTUP: ${AUTO_TRAIN_ON_STARTUP:-true}
+      AUTO_TRAIN_SAMPLES: ${AUTO_TRAIN_SAMPLES:-5000}
+      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-http://localhost:8501,http://127.0.0.1:8501}
+      API_KEY: ${API_KEY:-}
+      ENABLE_METRICS: "true"
     healthcheck:
-      test: ["CMD","python","-c","import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health/ready')"]
+      interval: 20s
+      timeout: 10s
+      retries: 5
+      start_period: 45s
+    restart: unless-stopped
+    networks:
+      - churnscope-network
+
+  churnscope-dashboard:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: dashboard
+    container_name: churnscope_dashboard
+    image: churnscope-dashboard:latest
+    ports:
+      - "${DASHBOARD_PORT:-8501}:8501"
+    environment:
+      PORT: "8501"
+      API_BASE_URL: http://churnscope-api:8000
+      PUBLIC_API_URL: http://localhost:${API_PORT:-8000}
+      API_KEY: ${API_KEY:-}
+      PWA_APP_NAME: ${PWA_APP_NAME:-ChurnScope — Customer Churn Intelligence}
+      PWA_SHORT_NAME: ${PWA_SHORT_NAME:-ChurnScope}
+      PWA_THEME_COLOR: ${PWA_THEME_COLOR:-#00d4ff}
+      PWA_BACKGROUND_COLOR: ${PWA_BACKGROUND_COLOR:-#020408}
+    depends_on:
+      churnscope-api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8501/_stcore/health')"]
       interval: 30s
       timeout: 10s
       retries: 3
       start_period: 30s
+    restart: unless-stopped
+    networks:
+      - churnscope-network
+
+  prometheus:
+    image: prom/prometheus:v2.53.0
+    container_name: churnscope_prometheus
+    profiles: ["monitoring"]
+    ports:
+      - "${PROMETHEUS_PORT:-9090}:9090"
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./monitoring/alert_rules.yml:/etc/prometheus/alert_rules.yml:ro
+    depends_on:
+      churnscope-api:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - churnscope-network
+
+  grafana:
+    image: grafana/grafana:11.1.0
+    container_name: churnscope_grafana
+    profiles: ["monitoring"]
+    ports:
+      - "${GRAFANA_PORT:-3000}:3000"
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+    volumes:
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./monitoring/grafana_dashboard.json:/var/lib/grafana/dashboards/churnscope.json:ro
+    depends_on:
+      - prometheus
     restart: unless-stopped
     networks:
       - churnscope-network
